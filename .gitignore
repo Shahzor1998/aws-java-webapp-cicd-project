@@ -1,0 +1,5 @@
+# Maven build output
+target/
+# Local AWS/account configuration (keep account IDs and tokens here, not in Git)
+.env
+.env.*
