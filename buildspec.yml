@@ -23,8 +23,9 @@ phases:
   post_build:
     commands:
       - echo "Build completed on `date`"
-      - echo Packaging artifacts...
-      - mvn package -s settings.xml 
+      - echo "====== PACKAGING BUILD STARTED ======"
+      - mvn package -s settings.xml
+      - echo "====== PACKAGING BUILD COMPLETED ======" 
 artifacts:
   files:
     - target/*.war
