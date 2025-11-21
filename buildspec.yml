@@ -18,15 +18,16 @@ phases:
       - echo "====== TEST PHASE COMPLETE ======"
       - echo "====== BEGINNING BUILD PHASE ======"
       - echo "Build started on `date`"
-      - mvn -s settings.xml compile
+      - mvn clean install -s settings.xml
       - echo "====== BUILD PHASE COMPLETE ======"
   post_build:
     commands:
       - echo "Build completed on `date`"
-      - mvn -s settings.xml package
+      - echo Packaging artifacts...
+      - mvn package -s settings.xml
 artifacts:
   files:
-    - target/nextwork-web-project.war
+    - target/*.war
     - appspec.yml
     - scripts/**/*
   discard-paths: no
