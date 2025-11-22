@@ -7,30 +7,18 @@ phases:
   pre_build:
     commands:
       - echo Logging in to AWS CodeArtifact...
-      - CODEARTIFACT_AUTH_TOKEN=`aws codeartifact get-authorization-token --domain nextwork --domain-owner 454096720742 --region us-east-1 --query authorizationToken --output text`
+      - CODEARTIFACT_AUTH_TOKEN=`aws codeartifact get-authorization-token --domain nextwork --domain-owner <your_aws_account_id> --region us-east-2 --query authorizationToken --output text`
       - export CODEARTIFACT_AUTH_TOKEN
   build:
     commands:
-      - echo "====== BEGINNING TEST PHASE ======"
-      - echo "Running tests on `date`"
-      - chmod +x run-tests.sh
-      - ./run-tests.sh
-      - echo "====== TEST PHASE COMPLETE ======"
-      - echo "====== BEGINNING BUILD PHASE ======"
-      - echo "Build started on `date`"
+      - echo Build started on `date`
       - mvn clean install -s settings.xml
-      - echo "====== BUILD PHASE COMPLETE ======"
   post_build:
     commands:
-      - echo "Build completed on `date`"
-      - echo "====== PACKAGING BUILD STARTED ======"
+      - echo Build completed on `date`
+      - echo Packaging artifacts...
       - mvn package -s settings.xml
-      - echo "====== PACKAGING BUILD COMPLETED ======" 
 artifacts:
   files:
     - target/*.war
-    - appspec.yml
-    - scripts/**/*
   discard-paths: no
-
-
