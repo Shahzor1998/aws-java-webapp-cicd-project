@@ -11,14 +11,24 @@ phases:
       - export CODEARTIFACT_AUTH_TOKEN
   build:
     commands:
-      - echo Build started on `date`
+      - echo "====== BEGINNING TEST PHASE ======"
+      - echo "Running tests on `date`"
+      - chmod +x run-tests.sh
+      - ./run-tests.sh
+      - echo "====== TEST PHASE COMPLETE ======"
+      - echo "====== BEGINNING BUILD PHASE ======"
+      - echo "Build started on `date`"
       - mvn clean install -s settings.xml
+      - echo "====== BUILD PHASE COMPLETE ======"
   post_build:
     commands:
-      - echo Build completed on `date`
-      - echo Packaging artifacts...
+      - echo "Build completed on `date`"
+      - echo "====== PACKAGING BUILD STARTED ======"
       - mvn package -s settings.xml
+      - echo "====== PACKAGING BUILD COMPLETED ======" 
 artifacts:
   files:
     - target/*.war
+    - appspec.yml
+    - scripts/**/*
   discard-paths: no
