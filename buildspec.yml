@@ -19,14 +19,12 @@ phases:
 
       - echo "Using CodeArtifact domain $CODEARTIFACT_DOMAIN in account $ACCOUNT_ID and region $AWS_REGION"
 
-      # Get auth token and export variables for Maven/settings.xml
-      - CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-          --domain $CODEARTIFACT_DOMAIN \
-          --domain-owner $ACCOUNT_ID \
-          --region $AWS_REGION \
-          --query authorizationToken \
-          --output text)
+      # Single-line command so YAML / shell don't break the args
+      - CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain $CODEARTIFACT_DOMAIN --domain-owner $ACCOUNT_ID --region $AWS_REGION --query authorizationToken --output text)
+
+      # Export for Maven/settings.xml
       - export CODEARTIFACT_AUTH_TOKEN CODEARTIFACT_DOMAIN CODEARTIFACT_REPOSITORY ACCOUNT_ID AWS_REGION
+
 
   build:
     commands:
