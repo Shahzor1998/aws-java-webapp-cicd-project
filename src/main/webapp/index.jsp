@@ -1,15 +1,12 @@
+<%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
+<!DOCTYPE html>
 <html>
-
-<body>
-
-<h2>Hello Shahzor!</h2>
-
-<p>This is my NextWork web application working!</p>
-
-<p>If you see this line in Github, that means your latest changes are getting pushed to your cloud repo :o</p>
-
-<p>If you see this line, that means your latest changes are automatically deployed into production by CodePipeline!</p>
-
-</body>
-
+  <head>
+    <title>AWS Java WebApp CI/CD Demo</title>
+  </head>
+  <body>
+    <h1>AWS Java WebApp CI/CD Demo</h1>
+    <p>If you see this page, your Java web app was built with Maven, stored in AWS CodeArtifact, and deployed to this EC2 web server by AWS CodeDeploy.</p>
+    <p>To change this content, edit <code>src/main/webapp/index.jsp</code>, push to GitHub, and let CodePipeline rebuild and redeploy automatically.</p>
+  </body>
 </html>

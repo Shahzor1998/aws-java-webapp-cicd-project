@@ -4,28 +4,48 @@ phases:
   install:
     runtime-versions:
       java: corretto8
+
   pre_build:
     commands:
-      - echo Logging in to AWS CodeArtifact...
-      - CODEARTIFACT_AUTH_TOKEN=`aws codeartifact get-authorization-token --domain nextwork --domain-owner 454096720742 --region us-east-1 --query authorizationToken --output text`
-      - export CODEARTIFACT_AUTH_TOKEN
+      - echo "Logging in to AWS CodeArtifact..."
+      
+      # Match your CloudFormation CodeArtifact names
+      - CODEARTIFACT_DOMAIN=aws-java-webapp-cicd-domain
+      - CODEARTIFACT_REPOSITORY=aws-java-webapp-cicd-packages
+
+      # Work out region and account in a generic way
+      - AWS_REGION=${AWS_DEFAULT_REGION:-$AWS_REGION}
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+      - echo "Using CodeArtifact domain $CODEARTIFACT_DOMAIN in account $ACCOUNT_ID and region $AWS_REGION"
+
+      # Get auth token and export variables for Maven/settings.xml
+      - CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+          --domain $CODEARTIFACT_DOMAIN \
+          --domain-owner $ACCOUNT_ID \
+          --region $AWS_REGION \
+          --query authorizationToken \
+          --output text)
+      - export CODEARTIFACT_AUTH_TOKEN CODEARTIFACT_DOMAIN CODEARTIFACT_REPOSITORY ACCOUNT_ID AWS_REGION
+
   build:
     commands:
       - echo "====== BEGINNING TEST PHASE ======"
-      - echo "Running tests on `date`"
+      - echo "Running tests on $(date)"
       - chmod +x run-tests.sh
       - ./run-tests.sh
       - echo "====== TEST PHASE COMPLETE ======"
       - echo "====== BEGINNING BUILD PHASE ======"
-      - echo "Build started on `date`"
       - mvn clean install -s settings.xml
       - echo "====== BUILD PHASE COMPLETE ======"
+
   post_build:
     commands:
-      - echo "Build completed on `date`"
+      - echo "Build completed on $(date)"
       - echo "====== PACKAGING BUILD STARTED ======"
       - mvn package -s settings.xml
-      - echo "====== PACKAGING BUILD COMPLETED ======" 
+      - echo "====== PACKAGING BUILD COMPLETED ======"
+
 artifacts:
   files:
     - target/*.war

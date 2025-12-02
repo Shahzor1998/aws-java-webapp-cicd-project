@@ -1,33 +1,36 @@
-<settings>
-    <servers>
-        <server>
-            <id>nextwork-nextwork-devops-cicd</id>
-            <username>aws</username>
-            <password>${env.CODEARTIFACT_AUTH_TOKEN}</password>
-        </server>
-    </servers>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
 
-    <profiles>
-        <profile>
-            <id>nextwork-nextwork-devops-cicd</id>
-            <activation>
-                <activeByDefault>true</activeByDefault>
-            </activation>
-            <repositories>
-                <repository>
-                    <id>nextwork-nextwork-devops-cicd</id>
-                    <url>https://nextwork-454096720742.d.codeartifact.us-east-1.amazonaws.com/maven/nextwork-devops-cicd/</url>
-                </repository>
-            </repositories>
-        </profile>
-    </profiles>
+  <servers>
+    <server>
+      <id>codeartifact-repo</id>
+      <username>aws</username>
+      <password>${env.CODEARTIFACT_AUTH_TOKEN}</password>
+    </server>
+  </servers>
 
-    <mirrors>
-        <mirror>
-            <id>nextwork-nextwork-devops-cicd</id>
-            <name>nextwork-nextwork-devops-cicd</name>
-            <url>https://nextwork-454096720742.d.codeartifact.us-east-1.amazonaws.com/maven/nextwork-devops-cicd/</url>
-            <mirrorOf>*</mirrorOf>
-        </mirror>
-    </mirrors>
+  <mirrors>
+    <mirror>
+      <id>codeartifact-repo</id>
+      <name>CodeArtifact Maven repository</name>
+      <url>https://${env.CODEARTIFACT_DOMAIN}-${env.ACCOUNT_ID}.d.codeartifact.${env.AWS_REGION}.amazonaws.com/maven/${env.CODEARTIFACT_REPOSITORY}/</url>
+      <mirrorOf>*</mirrorOf>
+    </mirror>
+  </mirrors>
+
+  <profiles>
+    <profile>
+      <id>codeartifact</id>
+      <activation>
+        <activeByDefault>true</activeByDefault>
+      </activation>
+      <repositories>
+        <repository>
+          <id>codeartifact-repo</id>
+          <url>https://${env.CODEARTIFACT_DOMAIN}-${env.ACCOUNT_ID}.d.codeartifact.${env.AWS_REGION}.amazonaws.com/maven/${env.CODEARTIFACT_REPOSITORY}/</url>
+        </repository>
+      </repositories>
+    </profile>
+  </profiles>
 </settings>

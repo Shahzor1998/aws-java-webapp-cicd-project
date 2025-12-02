@@ -1,7 +1,7 @@
 version: 0.0
 os: linux
 files:
-  - source: /target/nextwork-web-project.war
+  - source: /target/aws-java-webapp-cicd-project.war
     destination: /usr/share/tomcat/webapps/
 hooks:
   BeforeInstall:
@@ -16,4 +16,3 @@ hooks:
     - location: scripts/stop_server.sh
       timeout: 300
       runas: root
-
