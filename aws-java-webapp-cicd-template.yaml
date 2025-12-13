@@ -1,0 +1,526 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Generic CI/CD stack for an AWS Java web app using CodeArtifact, CodeBuild, CodeDeploy, and CodePipeline.
+
+Metadata:
+  AWSToolsMetrics:
+    IaC_Generator: "manual-refined-template"
+
+Parameters:
+  AppName:
+    Type: String
+    Default: aws-java-webapp-cicd
+    Description: Base name used for CI/CD resources (no spaces).
+  GitHubRepoOwner:
+    Type: String
+    Description: GitHub repository owner.
+    Default: your-github-username
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name.
+    Default: aws-java-webapp-cicd-project
+  GitBranchName:
+    Type: String
+    Description: Git branch to build and deploy.
+    Default: master
+  CodeStarConnectionArn:
+    Type: String
+    Description: ARN of an existing CodeStar/CodeConnections connection to the GitHub repository.
+
+Resources:
+  # EC2 instance role used by your deployment target(s)
+  IAMRoleEC2InstanceCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      MaxSessionDuration: 3600
+      RoleName: !Sub "EC2-instance-${AppName}-service-role"
+      Description: !Sub "Allows EC2 instances to access services related to the ${AppName} CI/CD pipeline."
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "ec2.amazonaws.com"
+
+  # CodeBuild service role
+  IAMRoleCodeBuildServiceRoleCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/service-role/"
+      MaxSessionDuration: 3600
+      RoleName: !Sub "CodeBuild-${AppName}-service-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "codebuild.amazonaws.com"
+
+  # CodeDeploy service role
+  IAMRoleCodeDeployServiceRoleCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole"
+      MaxSessionDuration: 3600
+      RoleName: !Sub "CodeDeploy-${AppName}-service-role"
+      Description: !Sub "Allows CodeDeploy to call AWS services such as Auto Scaling on your behalf for ${AppName}."
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "codedeploy.amazonaws.com"
+            Sid: ""
+
+  # Managed policy for CodeBuild to use CodeConnections / CodeStar
+  IAMManagedPolicyCodeBuildCodeConnectionsCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    DependsOn: IAMRoleCodeBuildServiceRoleCICD
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "CodeBuildCodeConnectionsPolicy-${AppName}-${AWS::Region}"
+      Path: "/service-role/"
+      Description: "Policy used with CodeBuild to access CodeConnections/CodeStar connections."
+      Groups: []
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - "codestar-connections:GetConnectionToken"
+              - "codestar-connections:GetConnection"
+              - "codestar-connections:UseConnection"
+              - "codeconnections:GetConnectionToken"
+              - "codeconnections:GetConnection"
+              - "codeconnections:UseConnection"
+            Resource: "*"
+      Roles:
+        - !Ref IAMRoleCodeBuildServiceRoleCICD
+      Users: []
+
+  # CodeArtifact domain
+  CodeArtifactDomainCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::CodeArtifact::Domain
+    Properties:
+      DomainName: !Sub "${AppName}-domain"
+
+  # CodeArtifact repo proxying Maven Central
+  CodeArtifactRepositoryMavenCentralStoreCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::CodeArtifact::Repository
+    Properties:
+      RepositoryName: "maven-central-store"
+      Description: "Provides Maven artifacts from Maven Central Repository."
+      ExternalConnections:
+        - "public:maven-central"
+      DomainName:
+        Fn::GetAtt:
+          - CodeArtifactDomainCICD
+          - Name
+
+  # CodeArtifact repo for your app packages
+  CodeArtifactRepositoryAppCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::CodeArtifact::Repository
+    Properties:
+      Upstreams:
+        - Fn::GetAtt:
+            - CodeArtifactRepositoryMavenCentralStoreCICD
+            - Name
+      RepositoryName: !Sub "${AppName}-packages"
+      Description: !Sub "Stores packages related to the ${AppName} Java web app."
+      DomainName:
+        Fn::GetAtt:
+          - CodeArtifactDomainCICD
+          - Name
+
+  # S3 bucket for CodeBuild artifacts
+  S3BucketBuildArtifactsCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketName: !Sub "${AppName}-build-artifacts-${AWS::AccountId}-${AWS::Region}"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: "BucketOwnerEnforced"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+
+  # CodeDeploy application
+  CodeDeployApplicationCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: !Sub "CodeDeploy-${AppName}-application"
+      ComputePlatform: "Server"
+
+  # CloudWatch logs policy for CodeBuild
+  IAMManagedPolicyCodeBuildCloudWatchLogsCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    DependsOn: IAMRoleCodeBuildServiceRoleCICD
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "CodeBuildCloudWatchLogsPolicy-${AppName}-${AWS::Region}"
+      Path: "/service-role/"
+      Description: "Policy used in trust relationship with CodeBuild for CloudWatch Logs."
+      Groups: []
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Resource:
+              - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AppName}"
+              - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AppName}:*"
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Effect: "Allow"
+      Roles:
+        - !Ref IAMRoleCodeBuildServiceRoleCICD
+      Users: []
+
+  # Base CodeBuild policy (logs, S3, reports)
+  IAMManagedPolicyCodeBuildBasePolicyCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    DependsOn: IAMRoleCodeBuildServiceRoleCICD
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "CodeBuildBasePolicy-${AppName}-${AWS::Region}"
+      Path: "/service-role/"
+      Description: "Policy used in trust relationship with CodeBuild."
+      Groups: []
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Resource:
+              - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AppName}"
+              - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AppName}:*"
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Effect: "Allow"
+          - Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::codepipeline-${AWS::Region}-*"
+            Action:
+              - "s3:PutObject"
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:GetBucketAcl"
+              - "s3:GetBucketLocation"
+            Effect: "Allow"
+          - Resource:
+              - !Sub
+                  - "arn:${AWS::Partition}:s3:::${BucketName}"
+                  - { BucketName: !Ref S3BucketBuildArtifactsCICD }
+              - !Sub
+                  - "arn:${AWS::Partition}:s3:::${BucketName}/*"
+                  - { BucketName: !Ref S3BucketBuildArtifactsCICD }
+            Action:
+              - "s3:PutObject"
+              - "s3:GetBucketAcl"
+              - "s3:GetBucketLocation"
+            Effect: "Allow"
+          - Resource:
+              - !Sub "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/${AppName}-*"
+            Action:
+              - "codebuild:CreateReportGroup"
+              - "codebuild:CreateReport"
+              - "codebuild:UpdateReport"
+              - "codebuild:BatchPutTestCases"
+              - "codebuild:BatchPutCodeCoverages"
+            Effect: "Allow"
+      Roles:
+        - !Ref IAMRoleCodeBuildServiceRoleCICD
+      Users: []
+
+  # CodeArtifact consumer policy for EC2 + CodeBuild
+  IAMManagedPolicyCodeArtifactConsumerPolicyCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    DependsOn:
+      - IAMRoleCodeBuildServiceRoleCICD
+      - IAMRoleEC2InstanceCICD
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: "codeartifact-consumer-policy"
+      Path: "/"
+      Description: "Provides permissions to read from CodeArtifact for EC2 and CodeBuild."
+      Groups: []
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Resource: "*"
+            Action:
+              - "codeartifact:GetAuthorizationToken"
+              - "codeartifact:GetRepositoryEndpoint"
+              - "codeartifact:ReadFromRepository"
+            Effect: "Allow"
+          - Condition:
+              StringEquals:
+                sts:AWSServiceName: "codeartifact.amazonaws.com"
+            Resource: "*"
+            Action: "sts:GetServiceBearerToken"
+            Effect: "Allow"
+      Roles:
+        - !Ref IAMRoleEC2InstanceCICD
+        - !Ref IAMRoleCodeBuildServiceRoleCICD
+      Users: []
+
+  # Instance profile for EC2 (to attach IAMRoleEC2InstanceCICD)
+  IAMInstanceProfileEC2InstanceCICD:
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: IAMRoleEC2InstanceCICD
+      InstanceProfileName: 
+        Ref: IAMRoleEC2InstanceCICD
+
+  # CodeBuild project (builds from GitHub, outputs to S3)
+  CodeBuildProjectCICDCloudFormation:
+    Type: AWS::CodeBuild::Project
+    DependsOn:
+      - IAMRoleCodeBuildServiceRoleCICD
+      - S3BucketBuildArtifactsCICD
+    Properties:
+      Name: !Ref AppName
+      Description: !Sub "Build project for ${AppName} web application."
+      Source:
+        Type: GITHUB
+        Location: !Sub "https://github.com/${GitHubRepoOwner}/${GitHubRepo}"
+        BuildSpec: buildspec.yml
+      Artifacts:
+        Type: S3
+        Name: !Sub "${AppName}-build-artifact.zip"
+        Packaging: ZIP
+        Location: !Ref S3BucketBuildArtifactsCICD
+        Path: /builds
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:corretto8
+      ServiceRole: !GetAtt IAMRoleCodeBuildServiceRoleCICD.Arn
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: !Sub "/aws/codebuild/${AppName}"
+          Status: ENABLED
+          StreamName: webapp
+
+  # CodeDeploy deployment group (targets EC2 instances tagged role=webserver)
+  CodeDeployDeploymentGroupCICD:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    DependsOn:
+      - IAMRoleCodeDeployServiceRoleCICD
+      - CodeDeployApplicationCICD
+    Properties:
+      ApplicationName: !Ref CodeDeployApplicationCICD
+      ServiceRoleArn: !GetAtt IAMRoleCodeDeployServiceRoleCICD.Arn
+      DeploymentGroupName: !Sub "${AppName}-deployment-group"
+      DeploymentConfigName: CodeDeployDefault.AllAtOnce
+      Ec2TagFilters:
+        - Key: role
+          Type: KEY_AND_VALUE
+          Value: webserver
+      AutoScalingGroups: []
+
+  # S3 bucket for CodePipeline artifacts
+  S3BucketCodePipelineArtifactsCICD:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketName: !Sub "codepipeline-${AWS::Region}-${AWS::AccountId}-${AppName}"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: "BucketOwnerEnforced"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+
+  # CodePipeline service role
+  IAMRoleCodePipelineServiceRoleCICD:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/service-role/"
+      RoleName: !Sub "${AppName}-CodePipelineServiceRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${AppName}-CodePipelinePolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # CodeBuild access
+              - Sid: CodeBuildAccess
+                Effect: Allow
+                Action:
+                  - "codebuild:BatchGetBuilds"
+                  - "codebuild:StartBuild"
+                  - "codebuild:BatchGetBuildBatches"
+                  - "codebuild:StartBuildBatch"
+                Resource: "*"
+              # CodeDeploy access (more complete set)
+              - Sid: CodeDeployAccess
+                Effect: Allow
+                Action:
+                  - "codedeploy:CreateDeployment"
+                  - "codedeploy:GetApplication"
+                  - "codedeploy:GetDeployment"
+                  - "codedeploy:GetDeploymentConfig"
+                  - "codedeploy:RegisterApplicationRevision"
+                  - "codedeploy:ListDeployments"
+                  - "codedeploy:ListDeploymentGroups"
+                  - "codedeploy:GetDeploymentGroup"
+                  - "codedeploy:ListDeploymentConfigs"
+                Resource: "*"
+              # S3 access for artifact buckets
+              - Sid: S3Access
+                Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketVersioning"
+                  - "s3:GetBucketAcl"
+                  - "s3:GetBucketLocation"
+                  - "s3:PutObject"
+                  - "s3:PutObjectAcl"
+                Resource: "*"
+              # Allow CodePipeline to use your CodeStar / CodeConnections
+              - Sid: CodeConnectionsAccess
+                Effect: Allow
+                Action:
+                  - "codestar-connections:UseConnection"
+                  - "codeconnections:UseConnection"
+                Resource: "*"
+              # PassRole (needed if any actions assume roles)
+              - Sid: PassRole
+                Effect: Allow
+                Action: "iam:PassRole"
+                Resource: "*"
+
+
+  # CodePipeline wiring Source -> Build -> Deploy
+  CodePipelineCICD:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub "${AppName}-cicd"
+      RoleArn: !GetAtt IAMRoleCodePipelineServiceRoleCICD.Arn
+      RestartExecutionOnUpdate: true
+      ArtifactStore:
+        Type: S3
+        Location: !Ref S3BucketCodePipelineArtifactsCICD
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
+              RunOrder: 1
+              Configuration:
+                BranchName: !Ref GitBranchName
+                ConnectionArn: !Ref CodeStarConnectionArn
+                FullRepositoryId: !Sub "${GitHubRepoOwner}/${GitHubRepo}"
+                OutputArtifactFormat: CODE_ZIP
+                DetectChanges: "true"
+              OutputArtifacts:
+                - Name: SourceArtifact
+              InputArtifacts: []
+              Region: !Ref "AWS::Region"
+              Namespace: SourceVariables
+          OnFailure:
+            Result: RETRY
+            RetryConfiguration:
+              RetryMode: ALL_ACTIONS
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              RunOrder: 1
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectCICDCloudFormation
+              OutputArtifacts:
+                - Name: BuildArtifact
+              InputArtifacts:
+                - Name: SourceArtifact
+              Region: !Ref "AWS::Region"
+              Namespace: BuildVariables
+          OnFailure:
+            Result: RETRY
+            RetryConfiguration:
+              RetryMode: ALL_ACTIONS
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CodeDeploy
+                Version: "1"
+              RunOrder: 1
+              Configuration:
+                ApplicationName: !Ref CodeDeployApplicationCICD
+                DeploymentGroupName: !Ref CodeDeployDeploymentGroupCICD
+              OutputArtifacts: []
+              InputArtifacts:
+                - Name: BuildArtifact
+              Region: !Ref "AWS::Region"
+              Namespace: DeployVariables
+          OnFailure:
+            Result: ROLLBACK
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: Source
+            Push:
+              - Branches:
+                  Includes:
+                    - !Ref GitBranchName
+      
