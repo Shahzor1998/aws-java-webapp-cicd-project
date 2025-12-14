@@ -1,5 +1,7 @@
 ---
 AWSTemplateFormatVersion: 2010-09-09
+Description: Web application server stack that provisions the runtime environment for the Java web app, including VPC networking, security group, IAM instance profile, and an EC2 web server (Apache + Tomcat) tagged for CodeDeploy deployments from the CI/CD pipeline.
+
 Parameters:
   AmazonLinuxAMIID:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
