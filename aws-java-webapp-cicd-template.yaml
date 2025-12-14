@@ -161,7 +161,7 @@ Resources:
         IgnorePublicAcls: true
         BlockPublicPolicy: true
         BlockPublicAcls: true
-      BucketName: !Sub "${AppName}-build-artifacts-${AWS::AccountId}-${AWS::Region}"
+      BucketName: !Sub "${AppName}-build-artifacts"
       OwnershipControls:
         Rules:
           - ObjectOwnership: "BucketOwnerEnforced"
